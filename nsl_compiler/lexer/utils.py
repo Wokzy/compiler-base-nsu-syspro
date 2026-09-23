@@ -1,7 +1,7 @@
+from .vocab import Token, Vocab
 
-from .base import Token, BaseVocab
 
-def build_raw_bpe_tokens(base: list[BaseVocab]) -> list[Token]:
+def build_raw_bpe_tokens(base: list[Vocab]) -> list[Token]:
 
     res = []
     # for i in range(256):
