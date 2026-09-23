@@ -18,11 +18,11 @@ class NSLCompiler:
         if self.config.input_file is not None:
             self.input_file = open(self.config.input_file, "r")
         if self.config.output_file is not None:
-            self.output_file = open(self.config.output_file, "r")
+            self.output_file = open(self.config.output_file, "w", encoding="utf-8")
 
-    def tokenize(self) -> str:
+    def tokenize(self) -> bool:
         text = self.input_file.read()
-        tokens = self.grammar.tokenize(text, add_eof=True)
+        tokens, status = self.grammar.tokenize(text, add_eof=True)
 
         json.dump(
             [token.to_dict() for token in tokens],
@@ -31,10 +31,12 @@ class NSLCompiler:
             ensure_ascii=False,
         )
 
+        return status
+
     def compile(self) -> None:
         raise NotImplementedError
 
 
 if __name__ == "__main__":
     compiler = NSLCompiler(config=parse_args())
-    compiler.tokenize()
+    sys.exit(compiler.tokenize())
