@@ -30,7 +30,10 @@ class Grammar1(BaseGrammar):
                 Token(15, "SEMI", ";"),
                 Token(16, "EOF"),
                 Token(17, "IDENT"),
-                Token(18, "UNK", "<unk>"),
+                Token(18, "ERROR", "<unk>"),
+                Token(19, "LINE_COMMENT", "//"),
+                Token(20, "COMMENT_BEGIN", "/*"),
+                Token(21, "COMMENT_END", "*/"),
             ]
         )
 
@@ -57,6 +60,9 @@ class Grammar1(BaseGrammar):
             raw = self.raw_tokenizer.encode(line)
 
             for token_id, offset in zip(raw.ids, raw.offsets):
+                if self.vocab[token_id].kind == "LINE_COMMENT":
+                    break
+
                 result.append(
                     Token(
                         token_id,
@@ -69,11 +75,13 @@ class Grammar1(BaseGrammar):
 
         return result
 
-    def _postprocess(self, raw_tokens: list[Token]):
+    def _postprocess(self, raw_tokens: list[Token]) -> tuple[list[Token], bool]:
 
         result = []
         concat: str = ""
         concat_position = {"line": 0, "column": 0}
+
+        error = False
 
         def __resolve_concat():
             nonlocal result, concat, concat_position
@@ -104,11 +112,25 @@ class Grammar1(BaseGrammar):
             concat = ""
             concat_position = {"line": 0, "column": 0}
 
+        multiline_comment = False
+        multiline_comment_start_position = {"line": 0, "column": 0}
+
         for token in raw_tokens:
-            if token.kind == "UNK":
-                raise RuntimeError(
-                    f"UNK token on position {token.line}: {token.column}"
-                )
+            if token.kind == "COMMENT_BEGIN":
+                multiline_comment = True
+                multiline_comment_start_position["line"] = token.line
+                multiline_comment_start_position["column"] = token.column
+                continue
+
+            if multiline_comment:
+                if token.kind == "COMMENT_END":
+                    multiline_comment = False
+                    multiline_comment_start_position = {"line": 0, "column": 0}
+                continue
+
+            if token.kind == "ERROR":
+                error = True
+
             if token.kind != "RAW_BPE":
                 if concat:
                     __resolve_concat()
@@ -122,10 +144,24 @@ class Grammar1(BaseGrammar):
                 assert len(token.value) == 1
                 concat += token.value
 
-        return result
+        if concat:
+            __resolve_concat()
 
-    def tokenize(self, text: str, add_eof: bool = True) -> list[Token]:
-        tokens = self._postprocess(self._raw_tokenize(text))
+        if multiline_comment:
+            result.append(
+                Token(
+                    18,
+                    "ERROR",
+                    value="Unterminated multiline comment",
+                    **multiline_comment_start_position,
+                )
+            )
+            error = True
+
+        return result, error
+
+    def tokenize(self, text: str, add_eof: bool = True) -> tuple[list[Token], bool]:
+        tokens, status = self._postprocess(self._raw_tokenize(text))
 
         if add_eof:
             lines = text.split("\n")
@@ -139,4 +175,4 @@ class Grammar1(BaseGrammar):
                 )
             )
 
-        return tokens
+        return tokens, status
