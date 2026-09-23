@@ -1,15 +1,15 @@
+from nsl_compiler.lexer import Token, Vocab
+from nsl_compiler.lexer.base import BaseGrammar
 
-from lexer import Token, Vocab
-from lexer.base import BaseGrammar
-
-from lexer import build_raw_bpe_tokens
+from nsl_compiler.lexer import build_raw_bpe_tokens
 
 from tokenizers import Tokenizer
 from tokenizers.models import WordPiece
 from tokenizers.pre_tokenizers import Whitespace
 
+
 class Grammar1(BaseGrammar):
-    def __int__(self):
+    def __init__(self):
         self.vocab = Vocab(
             [
                 Token(0, "INT"),
@@ -30,6 +30,7 @@ class Grammar1(BaseGrammar):
                 Token(15, "SEMI", ";"),
                 Token(16, "EOF"),
                 Token(17, "IDENT"),
+                Token(18, "UNK", "<unk>"),
             ]
         )
 
@@ -38,12 +39,14 @@ class Grammar1(BaseGrammar):
         self.raw_tokenizer = Tokenizer(
             WordPiece(
                 vocab=self.vocab.get_raw_tokens(),
+                unk_token="<unk>",
+                continuing_subword_prefix="",
             )
         )
         self.raw_tokenizer.pre_tokenizer = Whitespace()
 
     def _raw_tokenize(self, text: str) -> list[Token]:
-        lines = text.split('\n')
+        lines = text.split("\n")
 
         result = []
 
@@ -94,13 +97,19 @@ class Grammar1(BaseGrammar):
                     )
                 )
             else:
-                raise RuntimeError(f"Failed to resolve token {concat} at position {concat_position}")
+                raise RuntimeError(
+                    f"Failed to resolve token {concat} at position {concat_position}"
+                )
 
             concat = ""
             concat_position = {"line": 0, "column": 0}
 
         for token in raw_tokens:
-            if token.value != "RAW_BPE":
+            if token.kind == "UNK":
+                raise RuntimeError(
+                    f"UNK token on position {token.line}: {token.column}"
+                )
+            if token.kind != "RAW_BPE":
                 if concat:
                     __resolve_concat()
 
@@ -119,7 +128,7 @@ class Grammar1(BaseGrammar):
         tokens = self._postprocess(self._raw_tokenize(text))
 
         if add_eof:
-            lines = text.split('\n')
+            lines = text.split("\n")
             tokens.append(
                 Token(
                     id=16,
@@ -131,5 +140,3 @@ class Grammar1(BaseGrammar):
             )
 
         return tokens
-
-

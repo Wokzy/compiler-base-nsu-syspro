@@ -1,4 +1,3 @@
-
 from .utils import build_raw_bpe_tokens
 from .vocab import Token, Vocab
 

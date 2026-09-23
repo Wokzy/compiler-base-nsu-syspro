@@ -3,17 +3,18 @@ import argparse
 from pathlib import Path
 from dataclasses import dataclass
 
+
 @dataclass(frozen=True)
 class NSLCompilerConfig:
-    input_file: Path = None,
-    output_file: Path = None,
-    debug: bool = True
+    input_file: Path | None = None
+    output_file: Path | None = None
+    grammar: int = 1
+
 
 def parse_args() -> NSLCompilerConfig:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", type=Path, required=True)
-    parser.add_argument("output", type=Path, default=None, required=False)
-    parser.add_argument("--debug", "-g", type=bool, default=False, action="store_true",
-                        help="no-op")
+    parser.add_argument("input_file", nargs="?", type=Path, default=None)
+    parser.add_argument("output_file", nargs="?", type=Path, default=None)
+    parser.add_argument("--grammar", "-g", type=int, default=1, required=False)
 
     return NSLCompilerConfig(**parser.parse_args().__dict__.copy())
