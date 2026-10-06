@@ -4,13 +4,13 @@ import json
 from .args import parse_args, NSLCompilerConfig
 from dataclasses import dataclass
 
-from .lexer.grammars import get_grammar_by_id
+from .lexer import Lexer
 
 
 class NSLCompiler:
     def __init__(self, config: NSLCompilerConfig):
         self.config = config
-        self.grammar = get_grammar_by_id(config.grammar)()
+        self.lexer = Lexer()
 
         self.input_file = sys.stdin
         self.output_file = sys.stdout
@@ -22,7 +22,7 @@ class NSLCompiler:
 
     def tokenize(self) -> bool:
         text = self.input_file.read()
-        tokens, status = self.grammar.tokenize(text, add_eof=True)
+        tokens, status = self.lexer.tokenize(text, add_eof=True)
 
         json.dump(
             [token.to_dict() for token in tokens],
