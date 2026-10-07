@@ -22,6 +22,10 @@ class Token:
             "column": self.column,
         }
 
+    @property
+    def location(self):
+        return {"line": self.line, "column": self.column}
+
 
 class Vocab:
     def __init__(
@@ -117,4 +121,3 @@ def build_alnum_tokens(raw_bpe_kind: str) -> list[Token]:
         )
 
     return res
-

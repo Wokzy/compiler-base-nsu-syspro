@@ -13,21 +13,21 @@
       ]
     },
     "parser": {
-      "cmd": ["{root}/build/splc", "-g", "{grammar}", "-a", "{ast_in}", "{input}"],
+      "cmd": ["python3.12", "-m", "nsl_compiler", "-g", "{grammar}", "-a", "{input}", "{ast_out}"],
       "out": "{ast_out}",
       "preprocess": [
         {"type": "json", "keep": ["kind", "line", "column", "elems"]}
       ]
     },
     "llvm": {
-      "cmd": ["{root}/build/splc", "-g", "{grammar}", "-o", "{llvm_out}", "{input}"],
+      "cmd": ["python3.12", "-m", "nsl_compiler", "-g", "{grammar}", "-o", "{llvm_out}", "{input}"],
       "out": "{llvm_out}",
       "preprocess": [
         {"type": "llvm"}
       ]
     },
     "compiler": {
-      "cmd": ["{root}/build/splc", "-g", "{grammar}", "-o", "{exe}", "{input}"]
+      "cmd": ["python3.12", "-m", "nsl_compiler", "-g", "{grammar}", "-o", "{exe}", "{input}"]
     },
     "run": {
       "cmd": ["{exe}"],
