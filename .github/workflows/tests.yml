@@ -24,6 +24,9 @@ jobs:
       - name: Run grammar 1 lexer tests
         run: python3 test/run_tests.py --stage lexer --grammar 1 --test grammar1/ -v --keep all
 
+      - name: Run grammar 1 parser tests
+        run: python3 test/run_tests.py --stage parser --grammar 1 --test grammar1/ -v --keep all
+
       - name: Upload lexer test output
         if: always()
         uses: actions/upload-artifact@v7

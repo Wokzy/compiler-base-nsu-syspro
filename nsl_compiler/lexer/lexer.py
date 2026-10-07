@@ -29,6 +29,13 @@ class Lexer:
             ]
         )
 
+        self.errors: list[str] = []
+
+    def _error(self, token: Token, message: str) -> None:
+        self.errors.append(
+            f"Error: line {token.line}, column {token.column}: {message}"
+        )
+
     def _postprocess(self, raw_tokens: list[Token]) -> tuple[list[Token], bool]:
 
         result = []
@@ -57,8 +64,12 @@ class Lexer:
                     )
                 )
             else:
-                raise RuntimeError(
-                    f"Failed to resolve token {concat} at position {concat_position}"
+                self._error(
+                    Token(
+                        "ERROR",
+                        **multiline_comment_start_position,
+                    ),
+                    f"Failed to resolve token {concat}"
                 )
 
             concat = ""
@@ -81,7 +92,7 @@ class Lexer:
                 continue
 
             if token.kind == "ERROR":
-                error = True
+                self._error(token, "Syntax Error")
 
             if token.kind != "RAW_BPE":
                 if concat:
@@ -107,12 +118,15 @@ class Lexer:
                     **multiline_comment_start_position,
                 )
             )
-            error = True
 
-        return result, error
+            self._error(result[-1], result[-1].value)
+
+        return result
 
     def tokenize(self, text: str, add_eof: bool = True) -> tuple[list[Token], bool]:
-        tokens, status = self._postprocess(self.vocab.raw_tokenize(text))
+        self.errors = []
+
+        tokens = self._postprocess(self.vocab.raw_tokenize(text))
 
         if add_eof:
             lines = text.split("\n")
@@ -124,4 +138,4 @@ class Lexer:
                 )
             )
 
-        return tokens, status
+        return tokens, bool(self.errors)
