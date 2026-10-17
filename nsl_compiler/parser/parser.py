@@ -16,11 +16,12 @@ class Parser:
     def _advance(self, kind: str = None) -> Token:
         token = self._peek()
 
-        if token.kind != "EOF":
-            self.position += 1
-
         if kind is not None and token.kind != kind:
             self._error(token, f"expected {kind}, found {token.kind}")
+            return token
+
+        if token.kind != "EOF":
+            self.position += 1
 
         return token
 
@@ -85,12 +86,13 @@ class Parser:
                 expression = self._parse_expression()
                 if self._peek().kind == "RPAREN":
                     self._advance()
-                else:
-                    self._error(self._peek(), "expected ')' after expression")
-                return expression
+                    return expression
+
+                self._error(self._peek(), "expected ')' after expression")
+                return libast.Error(**self._peek().location)
             case _:
                 self._error(token, f"expected expression, found {token.kind}")
-                return libast.Error(**self._peek().location)
+                return libast.Error(**token.location)
 
     def _parse_statement(self) -> libast.ASTNode:
         first_token = self._peek()
@@ -109,8 +111,11 @@ class Parser:
                     self._finish_statement()
                     return libast.Error(**first_token.location)
 
-                self._advance("ASSIGN")
-                expression = self._parse_expression()
+                if (_assign_statement := self._advance("ASSIGN")).kind != "ASSIGN":
+                    expression = libast.Error(**_assign_statement.location)
+                else:
+                    expression = self._parse_expression()
+
                 statement = libast.DeclarationStatement(
                     subtype=first_token.kind,
                     elems=[libast.Ident(value=name.value, **name.location), expression],
@@ -124,14 +129,14 @@ class Parser:
 
             case "IDENT" if self._peek(1).kind == "ASSIGN":
                 name = self._advance()
-                self._advance()
+                assign_token = self._advance()
 
                 statement = libast.AssignmentStatement(
                     elems=[
                         libast.Ident(value=name.value, **name.location),
                         self._parse_expression(),
                     ],
-                    **name.location,
+                    **assign_token.location,
                 )
 
                 if name.value not in self.symbols:
