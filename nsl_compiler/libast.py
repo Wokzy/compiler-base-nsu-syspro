@@ -25,6 +25,10 @@ class ASTNode:
             result["value"] = self.value
         return result
 
+    def __iter__(self):
+        for elem in self.elems:
+            yield elem
+
 
 @dataclass
 class Program(ASTNode):
@@ -57,7 +61,12 @@ class AssignmentStatement(ASTNode):
 
 
 @dataclass
-class BinaryOperationExpr(ASTNode):
+class ExpressionStatement(ASTNode):
+    kind: str = "Expression"
+
+
+@dataclass
+class BinaryOperationExpr(ExpressionStatement):
     kind: str = "BinOp"
 
     def __post_init__(self):
@@ -66,26 +75,26 @@ class BinaryOperationExpr(ASTNode):
 
 @dataclass
 class MulExpr(BinaryOperationExpr):
-    subtype: str = "MUL"
+    subtype: str = "mul"
 
 
 @dataclass
 class SubExpr(BinaryOperationExpr):
-    subtype: str = "SUB"
+    subtype: str = "sub"
 
 
 @dataclass
 class AddExpr(BinaryOperationExpr):
-    subtype: str = "ADD"
+    subtype: str = "add"
 
 
 @dataclass
 class DivExpr(BinaryOperationExpr):
-    subtype: str = "DIV"
+    subtype: str = "sdiv"
 
 
 @dataclass
-class UnaryExpression(ASTNode):
+class UnaryExpression(ExpressionStatement):
     kind: str = "Unary"
 
     def __post_init__(self):
@@ -98,14 +107,16 @@ class Error(ASTNode):
 
 
 @dataclass
-class LiteralExpr(ASTNode):
+class LiteralExpr(ExpressionStatement):
     def __post_init__(self):
         assert self.value is not None
+        assert self.subtype is not None
 
 
 @dataclass
 class IntLiteral(LiteralExpr):
     kind: str = "IntLiteral"
+    subtype: str = "i64"
 
     def __post_init__(self):
         assert isinstance(self.value, int)

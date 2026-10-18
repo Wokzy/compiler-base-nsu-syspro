@@ -69,7 +69,7 @@ class Lexer:
                         "ERROR",
                         **multiline_comment_start_position,
                     ),
-                    f"Failed to resolve token {concat}"
+                    f"Failed to resolve token {concat}",
                 )
 
             concat = ""

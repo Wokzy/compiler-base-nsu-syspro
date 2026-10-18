@@ -1,5 +1,5 @@
 from ..lexer import Token
-from . import libast
+from nsl_compiler import libast
 
 
 class Parser:
