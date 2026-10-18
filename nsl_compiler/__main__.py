@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from .lexer import Lexer
 from .parser import Parser
+from .codegen import Visitor
 
 
 class NSLCompiler:
@@ -13,6 +14,7 @@ class NSLCompiler:
         self.config = config
         self.lexer = Lexer()
         self.parser = Parser()
+        self.visitor = Visitor()
 
         self.input_file = sys.stdin
         self.output_file = sys.stdout
@@ -22,7 +24,7 @@ class NSLCompiler:
         if self.config.output_file is not None:
             self.output_file = open(self.config.output_file, "w", encoding="utf-8")
 
-    def tokenize(self) -> bool:
+    def produce_tokens(self) -> bool:
         text = self.input_file.read()
         tokens, status = self.lexer.tokenize(text, add_eof=True)
 
@@ -45,6 +47,20 @@ class NSLCompiler:
         self.print_errors()
         return lexer_error or parser_error
 
+    def produce_llvm_ir(self) -> bool:
+
+        tokens, lexer_error = self.lexer.tokenize(self.input_file.read(), add_eof=True)
+        program, parser_error = self.parser.parse(tokens)
+
+        if lexer_error or parser_error:
+            self.print_errors()
+            return 1
+
+        codegen = self.visitor.generate_program(program=program)
+
+        self.output_file.write(codegen)
+        return 0
+
     def print_errors(self) -> None:
         for error in self.lexer.errors + self.parser.errors:
             print(error, file=sys.stderr)
@@ -59,4 +75,6 @@ if __name__ == "__main__":
 
     if config.produce_ast:
         sys.exit(compiler.produce_ast())
-    sys.exit(compiler.tokenize())
+    elif config.produce_llvm:
+        sys.exit(compiler.produce_llvm_ir())
+    sys.exit(compiler.produce_tokens())
