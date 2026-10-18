@@ -22,8 +22,8 @@ jobs:
         run: |
           pip install jsonschema
           python test/validate_schemas.py
-      - name: Install compiler dependencies
-        run: python3 -m pip install -r requirements.txt
+      # - name: Install compiler dependencies
+      #   run: python3 -m pip install -r requirements.txt
 
       - name: Run grammar 1 lexer tests
         run: python3 test/run_tests.py --stage lexer --grammar 1 --test grammar1/ -v --keep all
