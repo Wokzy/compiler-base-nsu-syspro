@@ -36,6 +36,43 @@ class Program(ASTNode):
 
 
 @dataclass
+class Block(ASTNode):
+    kind: str = "Block"
+
+
+@dataclass
+class IfStatement(ASTNode):
+    kind: str = "If"
+
+    def __post_init__(self):
+        assert 2 <= len(self.elems) <= 3  # expr, statement, [else]
+
+
+@dataclass
+class WhileStatement(ASTNode):
+    kind: str = "While"
+
+    def __post_init__(self):
+        assert len(self.elems) == 2
+
+
+@dataclass
+class BreakStatement(ASTNode):
+    kind: str = "Break"
+
+    def __post_init__(self):
+        assert len(self.elems) == 0
+
+
+@dataclass
+class ContinueStatement(ASTNode):
+    kind: str = "Continue"
+
+    def __post_init__(self):
+        assert len(self.elems) == 0
+
+
+@dataclass
 class ReturnStatement(ASTNode):
     kind: str = "Return"
 
@@ -94,8 +131,47 @@ class DivExpr(BinaryOperationExpr):
 
 
 @dataclass
+class LogicalOrExpr(BinaryOperationExpr):
+    subtype: str = "lor"
+
+
+@dataclass
+class LogicalAndExpr(BinaryOperationExpr):
+    subtype: str = "land"
+
+
+@dataclass
+class EqExpr(BinaryOperationExpr):
+    subtype: str = "eq"
+
+    def __post_init__(self):
+        assert self.subtype in {"eq", "ne"}
+
+
+@dataclass
+class RelExpr(BinaryOperationExpr):
+    subtype: str = "rel"
+
+
+@dataclass
 class UnaryExpression(ExpressionStatement):
     kind: str = "Unary"
+
+    def __post_init__(self):
+        assert len(self.elems) == 1
+
+
+@dataclass
+class UnaryMinus(UnaryExpression):
+    subtype: str = "minus"
+
+    def __post_init__(self):
+        assert len(self.elems) == 1
+
+
+@dataclass
+class LogicalNegate(UnaryExpression):
+    subtype: str = "lneg"
 
     def __post_init__(self):
         assert len(self.elems) == 1
@@ -120,6 +196,15 @@ class IntLiteral(LiteralExpr):
 
     def __post_init__(self):
         assert isinstance(self.value, int)
+
+
+@dataclass
+class BoolLiteral(LiteralExpr):
+    kind: str = "BoolLiteral"
+    subtype: str = "bool"
+
+    def __post_init__(self):
+        assert isinstance(self.value, bool)
 
 
 @dataclass

@@ -95,7 +95,7 @@ class Visitor:
                         id_=store_id,
                     )
                 return EvalExprResult(id_=symbol.id_)
-            case libast.UnaryExpression():
+            case libast.UnaryMinus():
                 store_id = self.__reserve_id()
                 expr = self._eval_expression(node.elems[0])
                 return EvalExprResult(
