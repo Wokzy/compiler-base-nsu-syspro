@@ -86,7 +86,8 @@ class Parser:
             operator = self._advance()
             right = self._parse_additive_expression()
             expression = libast.RelExpr(
-                subtype="s" + operator.kind.lower(),
+                subtype="s"
+                + operator.kind.lower(),  # NOTE: we have no types in grammar2, so we use 's' prefix here
                 elems=[expression, right],
                 **operator.location,
             )

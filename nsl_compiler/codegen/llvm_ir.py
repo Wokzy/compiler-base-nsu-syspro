@@ -1,6 +1,17 @@
 from nsl_compiler import libast
 from dataclasses import dataclass, field
 
+# from queue import LifoQueue
+
+
+EXTENTION_ORDER = {
+    "i1": 0,
+    "i8": 1,
+    "i16": 2,
+    "i32": 3,
+    "i64": 4,
+}
+
 
 @dataclass(frozen=True)
 class SymbolMeta:
@@ -31,6 +42,22 @@ class VisitorState:
     label: str = None
     output: str = ""
 
+    branching_nest_queue: list = field(default_factory=list)
+
+    def reserve_id(self) -> str:
+        # SSA registers must have unique ids within the function.
+        ident = f"%{self.store_counter}"
+        self.store_counter += 1
+        return ident
+
+    def reserve_label(self, comment: str = None) -> str:
+        if comment is not None:
+            ident = f"L{self.label_counter}_{comment}"
+        else:
+            ident = f"L{self.label_counter}"
+        self.label_counter += 1
+        return ident
+
     def post_instruction(self, inst: str) -> None:
         assert self.function is not None
         assert self.label is not None
@@ -39,8 +66,7 @@ class VisitorState:
 
     def switch_label(self, label: str = None) -> None:
         if label is None:
-            label = f"L{self.label_counter}"
-            self.label_counter += 1
+            label = self.reserve_label()
 
         if label == self.label:
             return
@@ -90,17 +116,11 @@ class Visitor:
                 f"Error: line {node.line}, column {node.column}: {message}"
             )
 
-    def __reserve_id(self) -> str:
-        # SSA registers must have unique ids within the function.
-        ident = f"%{self.state.store_counter}"
-        self.state.store_counter += 1
-        return ident
-
     def _allocate(self, type_: str = "i64", *, node: libast.ASTNode) -> str:
         self._assert(type_ == "i64", node, "types not equal to int64 are not supported")
 
-        ident = self.__reserve_id()
-        self.state.post_instruction(f"{ident} = alloca i64, align 8")
+        ident = self.state.reserve_id()
+        self.state.post_instruction(f"{ident} = alloca {type_}, align 8")
         return ident
 
     def _store(
@@ -108,7 +128,127 @@ class Visitor:
     ) -> None:
         self._assert(type_ == "i64", node, "types not equal to int64 are not supported")
 
-        self.state.post_instruction(f"store i64 {src_id}, ptr {dst_id}, align 8")
+        self.state.post_instruction(f"store {type_} {src_id}, ptr {dst_id}, align 8")
+
+    def _cast_integer(
+        self,
+        *,
+        src_expr: EvalExprResult,
+        dst_type: str,
+        dst_id: str = None,
+        bool_with_truncate: bool = False,
+    ) -> EvalExprResult:
+        """
+        Lazy integer type extention/truncation with `zext` used always
+        """
+
+        assert src_expr.type_ in EXTENTION_ORDER
+        assert dst_type in EXTENTION_ORDER
+
+        if src_expr.type_ == dst_type:
+            return src_expr
+
+        if dst_type == "i1" and not bool_with_truncate:
+            return self._int_to_bool(src_expr=src_expr, dst_id=dst_id)
+
+        way = "zext"  # NOTE: better to support `sext` here
+        if EXTENTION_ORDER[src_expr.type_] > EXTENTION_ORDER[dst_type]:
+            way = "trunc"
+
+        if dst_id is None:
+            dst_id = self.state.reserve_id()
+
+        self.state.post_instruction(
+            f"{dst_id} = {way} {src_expr.type_} {src_expr.id_} to {dst_type}"
+        )
+
+        return EvalExprResult(
+            id_=dst_id,
+            type_=dst_type,
+        )
+
+    def _int_to_bool(
+        self, *, src_expr: EvalExprResult, dst_id: str = None
+    ) -> EvalExprResult:
+        """
+        Lazy convertion to bool
+        """
+
+        if src_expr.type_ == "i1":
+            return EvalExprResult(
+                id_=src_expr.id_,
+                type_="i1",
+            )
+
+        assert (
+            src_expr.type_ in EXTENTION_ORDER
+        ), f"cannot convert {src_expr.type_} to bool ('i1')"
+
+        if dst_id is None:
+            dst_id = self.state.reserve_id()
+
+        self.state.post_instruction(
+            f"{dst_id} = cmp ne {src_expr.type_} {src_expr.id_}, 0"
+        )
+
+        return EvalExprResult(id_=dst_id, type_="i1")
+
+    def _is_integer_type(self, type_: str) -> bool:
+        assert type_ is not None
+        return type_ in EXTENTION_ORDER
+
+    def _castable(self, lhs_type: str, rhs_type: str) -> bool:
+        if lhs_type == rhs_type:
+            return True
+
+        if lhs_type in EXTENTION_ORDER and rhs_type in EXTENTION_ORDER:
+            return True
+
+        return False
+
+    def _mutual_cast(
+        self,
+        *,
+        lhs_expr: EvalExprResult,
+        rhs_expr: EvalExprResult,
+        target_type: str = None,
+    ) -> tuple[EvalExprResult, EvalExprResult]:
+        """
+        Takes 2 expression's results and lazily tries to cast it in following order:
+            1. To target type
+            2. If both are integers, cast to bigger (e.g i32, i64 -> i64, i64)
+            ...
+            If none succeded, throw RuntimeError
+
+        Return order is [cast(lhs_expr), cast(rhs_expr)]
+        """
+
+        if target_type is None:
+            if self._is_integer_type(lhs_expr.type_) and self._is_integer_type(
+                rhs_expr.type_
+            ):
+                target_type = (
+                    lhs_expr.type_
+                    if EXTENTION_ORDER[lhs_expr.type_] > EXTENTION_ORDER[rhs_expr.type_]
+                    else rhs_expr.type_
+                )
+            else:
+                raise NotImplementedError
+
+        if lhs_expr.type_ == target_type == rhs_expr.type_:
+            return (lhs_expr, rhs_expr)
+
+        assert self._castable(lhs_expr.type_, target_type)
+        assert self._castable(rhs_expr.type_, target_type)
+
+        return (
+            self._cast_integer(
+                src_expr=lhs_expr, dst_type=target_type, bool_with_truncate=False
+            ),
+            self._cast_integer(
+                src_expr=rhs_expr, dst_type=target_type, bool_with_truncate=False
+            ),
+        )
 
     def _eval_binary_expression(
         self, node: libast.BinaryOperationExpr
@@ -117,16 +257,42 @@ class Visitor:
         rhs = self._eval_expression(node.elems[1])
 
         self._assert(
-            lhs.type_ == rhs.type_, node, f"Type mismatch ({lhs.type_} != {rhs.type_})"
+            self._castable(lhs.type_, rhs.type_),
+            node,
+            f"Type mismatch ({lhs.type_} != {rhs.type_}) and cannot be cast to each other",
         )
 
-        store_id = self.__reserve_id()
-        self.state.post_instruction(
-            f"{store_id} = {node.subtype} {lhs.type_} {lhs.id_}, {rhs.id_}"
-        )
+        store_id = self.state.reserve_id()
+        return_type = None
+        match node:
+            case libast.BinaryArithmeticExpr():
+                lhs, rhs = self._mutual_cast(lhs_expr=lhs, rhs_expr=rhs)
+                self.state.post_instruction(
+                    f"{store_id} = {node.subtype} {lhs.type_} {lhs.id_}, {rhs.id_}"
+                )
+                return_type = lhs.type_
+            case libast.EqExpr() | libast.RelExpr():
+                lhs, rhs = self._mutual_cast(lhs_expr=lhs, rhs_expr=rhs)
+                self.state.post_instruction(
+                    f"{store_id} = icmp {node.subtype} {lhs.type_} {lhs.id_}, {rhs.id_}"
+                )
+                return_type = "i1"
+            case libast.LogicalAndExpr() | libast.LogicalOrExpr():
+                lhs, rhs = self._mutual_cast(
+                    lhs_expr=lhs, rhs_expr=rhs, target_type="i1"
+                )
+
+                self.state.post_instruction(
+                    f"{store_id} = {node.subtype} i1 {lhs.id_}, {rhs.id_}"
+                )
+                return_type = "i1"
+            case _:
+                raise RuntimeError(f"Unknown node for binary expression parser: {node}")
+
+        assert return_type is not None
         return EvalExprResult(
             id_=store_id,
-            type_=lhs.type_,
+            type_=return_type,
         )
 
     def _eval_expression(self, node: libast.ExpressionStatement) -> EvalExprResult:
@@ -138,10 +304,12 @@ class Visitor:
                     id_=str(node.value),
                     type_=node.subtype,
                 )
+            case libast.BoolLiteral():
+                return EvalExprResult(id_=str(int(node.value)), type_=node.subtype)
             case libast.Ident():
                 symbol = self.state.symbols[node.value]
                 if symbol.subtype == "VAR":
-                    store_id = self.__reserve_id()
+                    store_id = self.state.reserve_id()
                     self.state.post_instruction(
                         f"{store_id} = load {symbol.type_}, ptr {symbol.id_}, align 8"
                     )
@@ -152,13 +320,24 @@ class Visitor:
                 return EvalExprResult(id_=symbol.id_, type_=symbol.type_)
             case libast.UnaryMinus():
                 expr = self._eval_expression(node.elems[0])
-                store_id = self.__reserve_id()
+                store_id = self.state.reserve_id()
                 self.state.post_instruction(
                     f"{store_id} = sub {expr.type_} 0, {expr.id_}"
                 )
                 return EvalExprResult(
                     id_=store_id,
                     type_=expr.type_,
+                )
+            case libast.LogicalNegate():
+                expr = self._eval_expression(node.elems[0])
+                store_id = self.state.reserve_id()
+                self.state.post_instruction(
+                    f"{store_id} = icmp eq {expr.type_} {expr.id_}, {expr.type_} 0"
+                )
+
+                # NOTE: We explicitly convert logical outputs to i64 for grammar 2
+                return self._cast_integer(
+                    src_expr=EvalExprResult(id_=store_id, type_="i1"), dst_type="i64"
                 )
 
         self._assert(False, node, f"Failed to eval expression {node}")
@@ -169,6 +348,10 @@ class Visitor:
         expr = self._eval_expression(node.elems[1])
 
         if node.subtype == "VAR":
+            if expr.type_ != "i64":
+                expr.id_ = self._cast_integer(src_expr=expr, dst_type="i64")
+                expr.type_ = "i64"
+
             alloc_id = self._allocate(expr.type_, node=node)
             self._store(alloc_id, expr.id_, expr.type_, node=node)
 
@@ -178,7 +361,61 @@ class Visitor:
         # Keep the initializer operand, since val is immutable.
         self.state.symbols[name] = SymbolMeta(expr.id_, expr.type_, "VAL")
 
-    def generate(self, node: libast.ASTNode) -> None:
+    def _generate_if_else(self, node: libast.IfStatement):
+        expr_res = self._eval_expression(node.elems[0])
+        expr_res = self._int_to_bool(src_expr=expr_res)
+
+        label_if, label_finish = self.state.reserve_label(
+            "if_body"
+        ), self.state.reserve_label("if_else_finish")
+
+        if len(node.elems) == 3:
+            label_else = self.state.reserve_label("else_body")
+
+            self.state.post_instruction(
+                f"br i1 %{expr_res.id_}, label %{label_if}, label %{label_else}"
+            )
+
+            self.state.switch_label(label_else)
+            self.generate(node.elems[2])
+
+            self.state.post_instruction(f"br label %{label_finish}")
+        else:
+            self.state.post_instruction(
+                f"br i1 %{expr_res.id_}, label %{label_if}, label %{label_finish}"
+            )
+
+        self.state.switch_label(label_if)
+        self.generate(node.elems[1])
+
+        self.state.switch_label(label_finish)
+
+    def _generate_while_statement(self, node: libast.WhileStatement):
+        expr_res = self._eval_expression(node.elems[0])
+        expr_res = self._int_to_bool(src_expr=expr_res)
+
+        label_condition = self.state.reserve_label("while_header")
+        label_while = self.state.reserve_label("while_body")
+        label_finish = self.state.reserve_label("while_finish")
+
+        propageted_labes = (label_condition, label_finish)
+
+        self.state.switch_label(label_condition)
+        self.state.branching_nest_queue.append(propageted_labes)
+
+        self.state.post_instruction(
+            f"br i1 %{expr_res.id_}, label %{label_while}, label %{label_finish}"
+        )
+
+        self.generate(node.elems[1])
+
+        assert (
+            self.state.branching_nest_queue.pop() == propageted_labes
+        ), "label inconsistency found, during while generation"
+
+        self.state.switch_label(label_finish)
+
+    def generate(self, node: libast.ASTNode) -> libast.ASTNode | None:
 
         match node:
             case libast.Program():
@@ -212,6 +449,26 @@ class Visitor:
                 self._store(symbol.id_, expr.id_, type_=expr.type_, node=node)
             case libast.IfStatement():
                 self._generate_if_else(node)
+            case libast.WhileStatement():
+                self._generate_while_statement(node)
+            case libast.BreakStatement():
+                self._assert(
+                    len(self.state.branching_nest_queue),
+                    node,
+                    f"Break outside the loop",
+                )
+
+                while_finish = self.state.branching_nest_queue[-1][1]
+                self.state.post_instruction(f"br label %{while_finish}")
+            case libast.ContinueStatement():
+                self._assert(
+                    len(self.state.branching_nest_queue),
+                    node,
+                    f"Break outside the loop",
+                )
+
+                while_header = self.state.branching_nest_queue[-1][0]
+                self.state.post_instruction(f"br label %{while_header}")
             case _:
                 self._assert(False, node, f"Undefined statement {node}")
 

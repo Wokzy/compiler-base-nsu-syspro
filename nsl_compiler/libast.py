@@ -111,33 +111,38 @@ class BinaryOperationExpr(ExpressionStatement):
 
 
 @dataclass
-class MulExpr(BinaryOperationExpr):
+class BinaryArithmeticExpr(BinaryOperationExpr):
+    pass
+
+
+@dataclass
+class MulExpr(BinaryArithmeticExpr):
     subtype: str = "mul"
 
 
 @dataclass
-class SubExpr(BinaryOperationExpr):
+class SubExpr(BinaryArithmeticExpr):
     subtype: str = "sub"
 
 
 @dataclass
-class AddExpr(BinaryOperationExpr):
+class AddExpr(BinaryArithmeticExpr):
     subtype: str = "add"
 
 
 @dataclass
-class DivExpr(BinaryOperationExpr):
+class DivExpr(BinaryArithmeticExpr):
     subtype: str = "sdiv"
 
 
 @dataclass
 class LogicalOrExpr(BinaryOperationExpr):
-    subtype: str = "lor"
+    subtype: str = "or"
 
 
 @dataclass
 class LogicalAndExpr(BinaryOperationExpr):
-    subtype: str = "land"
+    subtype: str = "and"
 
 
 @dataclass
@@ -201,7 +206,7 @@ class IntLiteral(LiteralExpr):
 @dataclass
 class BoolLiteral(LiteralExpr):
     kind: str = "BoolLiteral"
-    subtype: str = "bool"
+    subtype: str = "i1"
 
     def __post_init__(self):
         assert isinstance(self.value, bool)
