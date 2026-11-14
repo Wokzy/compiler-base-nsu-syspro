@@ -75,7 +75,7 @@ class VisitorState:
         if not self.label_terminated:
             self.post_instruction(f"br label %{target}")
 
-    def switch_label(self, label: str = None) -> None:
+    def switch_label(self, label: str = None) -> str:
         if label is None:
             label = self.reserve_label()
 
@@ -84,12 +84,15 @@ class VisitorState:
 
         assert self.function is not None
         assert label not in self.labels
+
         assert self.label_terminated, "Previous block needs a terminator"
 
         self.output += f"\n{label}:\n"
         self.label = label
         self.labels.add(label)
         self.label_terminated = False
+
+        return label
 
     def switch_function(self, name: str, ret_type: str) -> None:
         if name == self.function:
@@ -268,36 +271,50 @@ class Visitor:
         self, node: libast.BinaryOperationExpr
     ) -> EvalExprResult:
         lhs = self._eval_expression(node.elems[0])
-        rhs = self._eval_expression(node.elems[1])
-
-        self._assert(
-            self._castable(lhs.type_, rhs.type_),
-            node,
-            f"Type mismatch ({lhs.type_} != {rhs.type_}) and cannot be cast to each other",
-        )
 
         store_id = self.state.reserve_id()
         return_type = None
         match node:
             case libast.BinaryArithmeticExpr():
+                rhs = self._eval_expression(node.elems[1])
                 lhs, rhs = self._mutual_cast(lhs_expr=lhs, rhs_expr=rhs)
                 self.state.post_instruction(
                     f"{store_id} = {node.subtype} {lhs.type_} {lhs.id_}, {rhs.id_}"
                 )
                 return_type = lhs.type_
             case libast.EqExpr() | libast.RelExpr():
+                rhs = self._eval_expression(node.elems[1])
                 lhs, rhs = self._mutual_cast(lhs_expr=lhs, rhs_expr=rhs)
                 self.state.post_instruction(
                     f"{store_id} = icmp {node.subtype} {lhs.type_} {lhs.id_}, {rhs.id_}"
                 )
                 return_type = "i1"
             case libast.LogicalAndExpr() | libast.LogicalOrExpr():
-                lhs, rhs = self._mutual_cast(
-                    lhs_expr=lhs, rhs_expr=rhs, target_type="i1"
-                )
+                lhs = self._int_to_bool(src_expr=lhs)
+                lhs_label = self.state.label
+                rhs_label = self.state.reserve_label("logic_rhs")
+                finish_label = self.state.reserve_label("logic_finish")
+
+                if isinstance(node, libast.LogicalAndExpr):
+                    self.state.post_instruction(
+                        f"br i1 {lhs.id_}, label %{rhs_label}, label %{finish_label}"
+                    )
+                else:
+                    self.state.post_instruction(
+                        f"br i1 {lhs.id_}, label %{finish_label}, label %{rhs_label}"
+                    )
+
+                self.state.switch_label(rhs_label)
+                rhs = self._eval_expression(node.elems[1])
+                rhs = self._int_to_bool(src_expr=rhs)
+                # Nested logical expressions can finish in a different block.
+                rhs_end_label = self.state.label
+
+                self.state.branch_if_open(finish_label)
+                self.state.switch_label(finish_label)
 
                 self.state.post_instruction(
-                    f"{store_id} = {node.subtype} i1 {lhs.id_}, {rhs.id_}"
+                    f"{store_id} = phi i1 [ {lhs.id_}, %{lhs_label} ], [ {rhs.id_}, %{rhs_end_label} ]"
                 )
                 return_type = "i1"
             case _:
