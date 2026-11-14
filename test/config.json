@@ -20,7 +20,7 @@
       ]
     },
     "llvm": {
-      "cmd": ["python3.12", "-m", "nsl_compiler", "-g", "{grammar}", "-o", "{llvm_out}", "{input}"],
+      "cmd": ["python3.12", "-m", "nsl_compiler", "-g", "{grammar}", "-c", "{input}", "{llvm_out}"],
       "out": "{llvm_out}",
       "preprocess": [
         {"type": "llvm"}
