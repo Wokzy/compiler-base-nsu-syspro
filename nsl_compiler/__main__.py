@@ -1,8 +1,8 @@
 import sys
 import json
+import subprocess
 
 from .args import parse_args, NSLCompilerConfig
-from dataclasses import dataclass
 
 from .lexer import Lexer
 from .parser import Parser
@@ -73,8 +73,21 @@ if __name__ == "__main__":
     config = parse_args()
     compiler = NSLCompiler(config=config)
 
+    command_result = 0
+
     if config.produce_ast:
-        sys.exit(compiler.produce_ast())
+        command_result = compiler.produce_ast()
     elif config.produce_llvm:
-        sys.exit(compiler.produce_llvm_ir())
-    sys.exit(compiler.produce_tokens())
+        command_result = compiler.produce_llvm_ir()
+    else:
+        command_result = compiler.produce_tokens()
+
+    if command_result:
+        sys.exit(command_result)
+
+    if config.external_command:
+        compiler.output_file.flush()
+        subprocess.check_call(config.external_command)
+
+    sys.exit(0)
+

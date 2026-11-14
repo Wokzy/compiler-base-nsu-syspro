@@ -33,6 +33,8 @@ jobs:
 
       - name: Run grammar 1 LLVM IR tests
         run: python3 test/run_tests.py --stage llvm --grammar 1 --test grammar1/ -v --keep all
+        run: python3 test/run_tests.py --stage compiler --grammar 1 --test grammar1/ -v --keep all
+        run: python3 test/run_tests.py --stage run --grammar 1 --test grammar1/ -v --keep all
 
       - name: Run grammar 2 lexer tests
         run: python3 test/run_tests.py --stage lexer --grammar 2 --test grammar1/ -v --keep all
@@ -42,6 +44,8 @@ jobs:
 
       - name: Run grammar 2 LLVM IR tests
         run: python3 test/run_tests.py --stage llvm --grammar 2 --test grammar1/ -v --keep all
+        run: python3 test/run_tests.py --stage compiler --grammar 2 --test grammar1/ -v --keep all
+        run: python3 test/run_tests.py --stage run --grammar 2 --test grammar1/ -v --keep all
 
       - name: Upload lexer test output
         if: always()

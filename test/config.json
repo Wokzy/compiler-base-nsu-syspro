@@ -27,7 +27,7 @@
       ]
     },
     "compiler": {
-      "cmd": ["python3.12", "-m", "nsl_compiler", "-g", "{grammar}", "-o", "{exe}", "{input}"]
+      "cmd": ["python3.12", "-m", "nsl_compiler", "-g", "{grammar}", "-c", "{input}", "{llvm_out}", "--", "clang", "{llvm_out}", "-o", "{exe}"]
     },
     "run": {
       "cmd": ["{exe}"],
