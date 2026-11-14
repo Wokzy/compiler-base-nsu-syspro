@@ -26,7 +26,9 @@ def parse_args() -> NSLCompilerConfig:
     parser.add_argument("--grammar", "-g", type=int, default=1, required=False)
     parser.add_argument("--produce-ast", "-a", action="store_true", required=False)
     parser.add_argument("--produce-llvm", "-c", action="store_true", required=False)
-    parser.add_argument("external_command", nargs="*") # NOTE: hack for running `clang` to compile llvm
+    parser.add_argument(
+        "external_command", nargs="*"
+    )  # NOTE: hack for running `clang` to compile llvm
 
     args = parser.parse_args()
     args.external_command = tuple(args.external_command)

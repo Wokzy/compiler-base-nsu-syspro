@@ -90,4 +90,3 @@ if __name__ == "__main__":
         subprocess.check_call(config.external_command)
 
     sys.exit(0)
-

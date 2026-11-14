@@ -43,10 +43,14 @@ class VisitorState:
     output: str = ""
 
     branching_nest_queue: list = field(default_factory=list)
+    # LLVM IR behaves stange when 2 br instructions go next to each other in the same label
+    # so we track "label clourure"
+    # Also, there is no fall-through between labels, so we use this flag to explicitly branch into another label
+    label_terminated: bool = False
 
     def reserve_id(self) -> str:
         # SSA registers must have unique ids within the function.
-        ident = f"%{self.store_counter}"
+        ident = f"%s{self.store_counter}"
         self.store_counter += 1
         return ident
 
@@ -61,8 +65,15 @@ class VisitorState:
     def post_instruction(self, inst: str) -> None:
         assert self.function is not None
         assert self.label is not None
+        assert not self.label_terminated, "Instruction after block terminator"
 
         self.output += f"  {inst}\n"
+        if inst.split()[0] in {"br", "ret"}:
+            self.label_terminated = True
+
+    def branch_if_open(self, target: str) -> None:
+        if not self.label_terminated:
+            self.post_instruction(f"br label %{target}")
 
     def switch_label(self, label: str = None) -> None:
         if label is None:
@@ -73,10 +84,12 @@ class VisitorState:
 
         assert self.function is not None
         assert label not in self.labels
+        assert self.label_terminated, "Previous block needs a terminator"
 
         self.output += f"\n{label}:\n"
         self.label = label
         self.labels.add(label)
+        self.label_terminated = False
 
     def switch_function(self, name: str, ret_type: str) -> None:
         if name == self.function:
@@ -95,6 +108,7 @@ class VisitorState:
 
         self.function = name
         self.label = "entry"
+        self.label_terminated = False
         self.store_counter = 0
         self.label_counter = 0
         self.labels = {"entry"}
@@ -188,7 +202,7 @@ class Visitor:
             dst_id = self.state.reserve_id()
 
         self.state.post_instruction(
-            f"{dst_id} = cmp ne {src_expr.type_} {src_expr.id_}, 0"
+            f"{dst_id} = icmp ne {src_expr.type_} {src_expr.id_}, 0"
         )
 
         return EvalExprResult(id_=dst_id, type_="i1")
@@ -332,7 +346,7 @@ class Visitor:
                 expr = self._eval_expression(node.elems[0])
                 store_id = self.state.reserve_id()
                 self.state.post_instruction(
-                    f"{store_id} = icmp eq {expr.type_} {expr.id_}, {expr.type_} 0"
+                    f"{store_id} = icmp eq {expr.type_} {expr.id_}, 0"
                 )
 
                 # NOTE: We explicitly convert logical outputs to i64 for grammar 2
@@ -349,7 +363,7 @@ class Visitor:
 
         if node.subtype == "VAR":
             if expr.type_ != "i64":
-                expr.id_ = self._cast_integer(src_expr=expr, dst_type="i64")
+                expr.id_ = self._cast_integer(src_expr=expr, dst_type="i64").id_
                 expr.type_ = "i64"
 
             alloc_id = self._allocate(expr.type_, node=node)
@@ -373,39 +387,48 @@ class Visitor:
             label_else = self.state.reserve_label("else_body")
 
             self.state.post_instruction(
-                f"br i1 %{expr_res.id_}, label %{label_if}, label %{label_else}"
+                f"br i1 {expr_res.id_}, label %{label_if}, label %{label_else}"
             )
 
             self.state.switch_label(label_else)
             self.generate(node.elems[2])
 
-            self.state.post_instruction(f"br label %{label_finish}")
+            # else_terminated = self.state.label_terminated
+            self.state.branch_if_open(label_finish)
         else:
             self.state.post_instruction(
-                f"br i1 %{expr_res.id_}, label %{label_if}, label %{label_finish}"
+                f"br i1 {expr_res.id_}, label %{label_if}, label %{label_finish}"
             )
 
         self.state.switch_label(label_if)
         self.generate(node.elems[1])
 
+        # if len(node.elems) == 3 and else_terminated and self.state.label_terminated:
+        #     return
+
+        self.state.branch_if_open(label_finish)
         self.state.switch_label(label_finish)
 
     def _generate_while_statement(self, node: libast.WhileStatement):
-        expr_res = self._eval_expression(node.elems[0])
-        expr_res = self._int_to_bool(src_expr=expr_res)
-
         label_condition = self.state.reserve_label("while_header")
         label_while = self.state.reserve_label("while_body")
         label_finish = self.state.reserve_label("while_finish")
 
+        self.state.branch_if_open(label_condition)
+        self.state.switch_label(label_condition)
+
+        expr_res = self._eval_expression(node.elems[0])
+        expr_res = self._int_to_bool(src_expr=expr_res)
+
         propageted_labes = (label_condition, label_finish)
 
-        self.state.switch_label(label_condition)
         self.state.branching_nest_queue.append(propageted_labes)
 
         self.state.post_instruction(
-            f"br i1 %{expr_res.id_}, label %{label_while}, label %{label_finish}"
+            f"br i1 {expr_res.id_}, label %{label_while}, label %{label_finish}"
         )
+
+        self.state.switch_label(label_while)
 
         self.generate(node.elems[1])
 
@@ -413,6 +436,7 @@ class Visitor:
             self.state.branching_nest_queue.pop() == propageted_labes
         ), "label inconsistency found, during while generation"
 
+        self.state.branch_if_open(label_condition)
         self.state.switch_label(label_finish)
 
     def generate(self, node: libast.ASTNode) -> libast.ASTNode | None:
@@ -422,6 +446,8 @@ class Visitor:
                 self.generate_program(node)
             case libast.Block():
                 for inner in node.elems:
+                    if self.state.label_terminated:
+                        break
                     self.generate(inner)
             case libast.DeclarationStatement():
                 self._declare(node)
@@ -483,15 +509,16 @@ class Visitor:
         else:
             self.state = state
 
-        has_return = False
-
         for node in program:
-            self.generate(node)
-            if isinstance(node, libast.ReturnStatement):
-                has_return = True
+            if self.state.label_terminated:
                 break
+            self.generate(node)
 
-        self._assert(has_return, program, "Program must contain a return statement")
+        self._assert(
+            self.state.label_terminated,
+            program,
+            "Program must contain a return statement",
+        )
 
         # A supplied state leaves function wrapping to its caller.
         if state is None:
