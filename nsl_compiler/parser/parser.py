@@ -362,7 +362,9 @@ class Parser:
             if self._advance("SEMI").kind != "SEMI":
                 return libast.Error(**first_token.location)
 
-            return libast.ExternDecl(elems=func_elems, **first_token.location)
+            return libast.ExternDecl(
+                elems=func_elems, subtype="i64", **first_token.location
+            )
 
         opening = self._peek()
 
@@ -379,7 +381,7 @@ class Parser:
                 func_name, f"function '{func_name.value}' does not return on every path"
             )
 
-        return libast.FuncDecl(elems=func_elems, **first_token.location)
+        return libast.FuncDecl(elems=func_elems, subtype="i64", **first_token.location)
 
     def parse_top_declaration(self) -> libast.ASTNode:
         first_token = self._advance()

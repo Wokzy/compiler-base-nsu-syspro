@@ -67,15 +67,6 @@ class FuncDecl(ASTNode):
 
 
 @dataclass
-class Call(ASTNode):
-    kind: str = "Call"
-
-    def __post_init__(self):
-        assert len(self.elems) >= 1  # callee, args...
-        assert isinstance(self.elems[0], Ident)
-
-
-@dataclass
 class IfStatement(ASTNode):
     kind: str = "If"
 
@@ -143,6 +134,15 @@ class BinaryOperationExpr(ExpressionStatement):
 
     def __post_init__(self):
         assert len(self.elems) == 2
+
+
+@dataclass
+class Call(ExpressionStatement):
+    kind: str = "Call"
+
+    def __post_init__(self):
+        assert len(self.elems) >= 1  # callee, args...
+        assert isinstance(self.elems[0], Ident)
 
 
 @dataclass
