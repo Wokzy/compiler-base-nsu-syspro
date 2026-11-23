@@ -1,6 +1,8 @@
 from ..lexer import Token
 from nsl_compiler import libast
 
+TOP_DECLARATION_KEYWORDS = {"DEF", "EXTERN"}
+
 
 class Parser:
 
@@ -9,7 +11,7 @@ class Parser:
         self.position: int = 0
         self.errors: list[str] = []
 
-        self.top_level_symbols: dict[str, str] = {}
+        self.top_level_symbols: set[str] = set()
         self.symbols: dict[str, str] = {}
 
         self.loop_depth: int = 0
@@ -35,7 +37,7 @@ class Parser:
         )
 
     def declared(self, token: Token) -> bool:
-        token.value in self.top_level_symbols or token.value in self.symbols
+        return token.value in self.top_level_symbols or token.value in self.symbols
 
     def _finish_statement(self, force: bool = False) -> None:
         if self._peek().kind == "SEMI":
@@ -45,7 +47,8 @@ class Parser:
         if not force:
             self._error(self._peek(), "expected ';' after statement")
 
-        while self._peek().kind not in {"SEMI", "RBRACE", "EOF"}:
+        boundaries = TOP_DECLARATION_KEYWORDS | {"SEMI", "RBRACE", "EOF"}
+        while self._peek().kind not in boundaries:
             self._advance()
 
         if self._peek().kind == "SEMI":
@@ -92,8 +95,8 @@ class Parser:
             operator = self._advance()
             right = self._parse_additive_expression()
             expression = libast.RelExpr(
-                subtype="s"
-                + operator.kind.lower(),  # NOTE: we have no types in grammar2, so we use 's' prefix here
+                subtype="s"  # NOTE: we have no types in grammar3, so we use 's' prefix here
+                + operator.kind.lower(),
                 elems=[expression, right],
                 **operator.location,
             )
@@ -132,33 +135,45 @@ class Parser:
         return self._parse_call_expression()
 
     def _parse_call_expression(self) -> libast.ASTNode:
+        callee = self._parse_primary_expression()
 
-        primary_expr = self._parse_primary_expression()
-        if primary_expr.kind != "Ident" or self._peek().kind != "LPAREN":
-            return primary_expr
+        if self._peek().kind == "LPAREN":
+            opening = self._advance()
 
-        self._advance("LPAREN")
-        function_name = primary_expr.value
+            elems = [callee]
+            if self._peek().kind != "RPAREN":
+                while True:
+                    elems.append(self._parse_expression())
+                    if self._peek().kind != "COMMA":
+                        break
+                    self._advance()
 
-        args = [function_name]
-        while self._peek().kind != "RPAREN":
-            args.append(self._parse_expression())
+            if self._advance("RPAREN").kind != "RPAREN":
+                return libast.Error(**opening.location)
 
-            if self._peek().kind == "COMMA":
-                self._advance()
-            elif (tok := self._peek()).kind != "RPAREN":
-                self._error(tok, f"expected ',' or ')' when calling function, found {tok.value}")
-                return libast.Error(**tok.location)
+            if not isinstance(callee, libast.Ident):
+                self._error(opening, "expected a function name before '('")
+                return libast.Error(**opening.location)
 
-        return libast.Call(
-            elems=args,
-            line=primary_expr.line,
-            column=primary_expr.column,
-        )
+            if callee.value in self.symbols:
+                self._error(opening, f"cannot call variable '{callee.value}'")
 
+            callee = libast.Call(elems=elems, **opening.location)
 
+        return callee
 
     def _parse_primary_expression(self) -> libast.ASTNode:
+        next_token = self._peek()
+
+        if next_token.kind in TOP_DECLARATION_KEYWORDS | {
+            "COMMA",
+            "RPAREN",
+            "SEMI",
+            "RBRACE",
+        }:
+            self._error(next_token, f"expected expression, found {next_token.kind}")
+            return libast.Error(**next_token.location)
+
         token = self._advance()
         match token.kind:
             case "INT":
@@ -188,7 +203,8 @@ class Parser:
             case "LBRACE":
                 opening_token = self._advance()
                 statements = []
-                while self._peek().kind not in {"RBRACE", "EOF"}:
+                boundaries = TOP_DECLARATION_KEYWORDS | {"RBRACE", "EOF"}
+                while self._peek().kind not in boundaries:
                     statements.append(self._parse_statement())
 
                 self._advance("RBRACE")
@@ -242,6 +258,8 @@ class Parser:
                     self._error(
                         name, f"assignment to undeclared variable '{name.value}'"
                     )
+                elif name.value in self.top_level_symbols:
+                    self._error(name, f"cannot assign to function '{name.value}'")
                 elif self.symbols[name.value] == "VAL":
                     self._error(name, f"cannot assign to val '{name.value}'")
             case "IF" | "WHILE":
@@ -296,89 +314,166 @@ class Parser:
         self._finish_statement()
         return statement
 
-    def parse_function(self, first_token: Token) -> libast.ASTNode:
-        assert first_token.kind in {"EXTERN", "DEF"}
+    def _parse_function(self, first_token: Token) -> libast.ASTNode:
+        if first_token.kind == "EXTERN" and self._advance("DEF").kind != "DEF":
+            return libast.Error(**first_token.location)
 
-        self._advance(kind="DEF")
-        func_name = self._advance(kind="IDENT").value
+        func_name = self._advance("IDENT")
+        if func_name.kind != "IDENT" or self._advance("LPAREN").kind != "LPAREN":
+            return libast.Error(**first_token.location)
 
         self.symbols = {}
-        self.top_level_symbols[func_name] = first_token.kind
-        
-        if (nxt := self._peek()).kind != "LPAREN":
-            self._error(nxt, "expected '(' in function declaration")
-            top_decl = libast.Error(**nxt.location)
-            return top_decl
 
-        func_elems = [func_name]
+        func_elems = [
+            libast.Ident(
+                subtype="function",
+                value=func_name.value,
+                **func_name.location,
+            )
+        ]
 
-        while self._peek() != "RPAREN":
-            name = self._advance()
-            if name.kind != "IDENT":
-                self._error(name, f"expected only repeated IDENT/COMMA in function arguments declaration, found {name.value}")
+        if self._peek().kind != "RPAREN":
+            while True:
+                name = self._advance("IDENT")
 
-            self.symbols[name] = "VAL" # NOTE: Here we disallow prarmeter modification
-            func_elems.append(
-                libast.Param(
-                    subtype="i64",
-                    **name.location
+                if name.kind != "IDENT":
+                    return libast.Error(**first_token.location)
+
+                if name.value in self.symbols:
+                    self._error(name, f"parameter '{name.value}' is already declared")
+
+                self.symbols[name.value] = (
+                    "VAL"  # NOTE: Here we explicitly disallow parameter modification
                 )
-            )
 
-            sep = self._advance()
-            if sep.kind == "RPAREN":
-                break
-            if sep.kind == "COMMA":
-                continue
+                func_elems.append(
+                    libast.Ident(subtype="i64", value=name.value, **name.location)
+                )
 
-            self._error(name, f"expected ')' or ',' after argument definition, found {name.value}")
-            return libast.Error(
-                **name.location,
-            )
+                if self._peek().kind != "COMMA":
+                    break
+
+                self._advance()
+
+        if self._advance("RPAREN").kind != "RPAREN":
+            return libast.Error(**first_token.location)
 
         if first_token.kind == "EXTERN":
-            semi = self._peek()
-            if semi.kind != "SEMI":
-                self._error(name, f"expected ';' after external function declaration, found {semi.value}")
-                return libast.Error(
-                    **semi.location,
-                )
-
-            return libast.ExternDecl(
-                elems=func_elems,
-                **first_token.location,
-            )
-
-        body = self._parse_statement()
-        if body.kind != "Block" and body.kind != "Error":
-            self._error(body, "expected function body")
-            return libast.Error(
-                line=body.line,
-                column=body.column,
-            )
-
-        func_elems.append(body)
-
-        return libast.FuncDecl(
-            elems=func_elems,
-            **first_token.location,
-        )
-
-    def parse_top_declaration(self) -> libast.ASTNode:
-        first_token = self._peek()
-
-        top_decl = None
-        match first_token:
-            case "EXTERN":
-                self._advance()
-                return self.parse_function(first_token)
-            case "DEF":
-                return self.parse_function(first_token)
-            case _:
-                self._error(first_token, "top program must contain only function declarations")
+            if self._advance("SEMI").kind != "SEMI":
                 return libast.Error(**first_token.location)
 
-        return top_decl
+            return libast.ExternDecl(elems=func_elems, **first_token.location)
+
+        opening = self._peek()
+
+        if opening.kind != "LBRACE":
+            self._error(opening, "expected function body")
+            return libast.Error(**first_token.location)
+
+        body = self._parse_statement()
+        func_elems.append(body)
+
+        exits = self._statement_exits(body)
+        if "fallthrough" in exits or "return" not in exits:
+            self._error(
+                func_name, f"function '{func_name.value}' does not return on every path"
+            )
+
+        return libast.FuncDecl(elems=func_elems, **first_token.location)
+
+    def parse_top_declaration(self) -> libast.ASTNode:
+        first_token = self._advance()
+
+        if first_token.kind in TOP_DECLARATION_KEYWORDS:
+            return self._parse_function(first_token)
+
+        self._error(first_token, "expected a top-level function declaration")
+        return libast.Error(**first_token.location)
+
+    def _collect_function_names(self) -> set[str]:
+        names = set()
+        brace_depth = 0
+
+        for token, next_token in zip(self.tokens, self.tokens[1:]):
+            if token.kind == "LBRACE":
+                brace_depth += 1
+            elif token.kind == "RBRACE":
+                brace_depth = max(0, brace_depth - 1)
+            elif (
+                brace_depth == 0 and token.kind == "DEF" and next_token.kind == "IDENT"
+            ):
+                names.add(next_token.value)
+
+        return names
+
+    def _statement_exits(self, statement: libast.ASTNode) -> set[str]:
+        """
+        We need this lookup to find out, does function body have a return statement on every reachable path.
+        Example gracia:
+
+        def foo(a) {
+            if (a > 5)
+                return 1;
+            else
+                return 0;
+        }
+
+        in this case last Block element of foo won't be a return statement
+        but foo always returns a value
+        """
+
+        match statement:
+            case libast.ReturnStatement():
+                return {"return"}
+            case libast.BreakStatement():
+                return {"break"}
+            case libast.ContinueStatement():
+                return {"continue"}
+            case libast.Block(elems=statements):
+                exits = {"fallthrough"}
+
+                for child in statements:
+                    if "fallthrough" not in exits:
+                        break
+
+                    exits.remove("fallthrough")
+                    exits.update(self._statement_exits(child))
+
+                return exits
+            case libast.IfStatement(elems=[condition, then_branch, *else_branch]):
+                truth = libast._literal_to_bool(
+                    condition
+                )  # NOTE: used to ignore unreachable paths
+                exits = set()
+
+                if truth is not False:
+                    exits.update(self._statement_exits(then_branch))
+
+                if truth is not True:
+                    exits.update(
+                        self._statement_exits(else_branch[0])
+                        if else_branch
+                        else {"fallthrough"}
+                    )
+
+                return exits
+
+            case libast.WhileStatement(elems=[condition, loop_body]):
+                truth = libast._literal_to_bool(
+                    condition
+                )  # NOTE: used to ignore unreachable paths
+                if truth is False:
+                    return {"fallthrough"}
+
+                body_exits = self._statement_exits(loop_body)
+                exits = body_exits & {"return"}
+
+                if truth is not True or "break" in body_exits:
+                    exits.add("fallthrough")
+
+                return exits
+            case _:
+                return {"fallthrough"}
 
     def parse(self, tokens: list[Token]) -> tuple[libast.Program, bool]:
 
@@ -396,13 +491,28 @@ class Parser:
                 Token("EOF", line=last.line, column=last.column + len(last.value or ""))
             )
 
+        self.top_level_symbols = self._collect_function_names()
         program = libast.Program(**self._peek().location)
-        while self._peek().kind != "EOF":
-            program.elems.append(self._parse_statement())
 
-        if not program.elems:
-            self._error(self._peek(), "expected at least one statement")
-        elif not isinstance(program.elems[-1], libast.ReturnStatement):
-            self._error(self._peek(), "the last statement must be a return statement")
+        while self._peek().kind != "EOF":
+            declaration = self.parse_top_declaration()
+            program.elems.append(declaration)
+
+            if isinstance(declaration, libast.Error):
+                while self._peek().kind not in TOP_DECLARATION_KEYWORDS | {"EOF"}:
+                    self._advance()
+
+        if (
+            len(
+                [
+                    True
+                    for node in program.elems
+                    if isinstance(node, libast.FuncDecl)
+                    and node.elems[0].value == "main"
+                ]
+            )
+            != 1
+        ):
+            self._error(self._peek(), "expected only 1 definition of 'main'")
 
         return program, bool(self.errors)

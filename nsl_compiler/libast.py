@@ -46,9 +46,11 @@ class ExternDecl(ASTNode):
 
     def __post_init__(self):
         assert len(self.elems) >= 1  # name, params...
-        assert isinstance(self.elems[0], str)
+        assert isinstance(self.elems[0], Ident)
         for el in self.elems[1:]:
-            assert isinstance(el, Param)
+            assert isinstance(
+                el, Ident
+            )  # NOTE: Grammar-3 tests expect Ident instead of Param
 
 
 @dataclass
@@ -57,9 +59,11 @@ class FuncDecl(ASTNode):
 
     def __post_init__(self):
         assert len(self.elems) >= 2  # name, params..., body
-        assert isinstance(self.elems[0], str)
+        assert isinstance(self.elems[0], Ident)
         for el in self.elems[1:-1]:
-            assert isinstance(el, Param)
+            assert isinstance(
+                el, Ident
+            )  # NOTE: Grammar-3 tests expect Ident instead of Param
 
 
 @dataclass
@@ -68,7 +72,7 @@ class Call(ASTNode):
 
     def __post_init__(self):
         assert len(self.elems) >= 1  # callee, args...
-        assert isinstance(self.elems[0], str)
+        assert isinstance(self.elems[0], Ident)
 
 
 @dataclass
@@ -250,9 +254,16 @@ class Ident(LiteralExpr):
     def __post_init__(self):
         assert isinstance(self.value, str)
 
+
 @dataclass
 class Param(Ident):
     kind: str = "Param"
 
     def __post_init__(self):
         assert isinstance(self.value, str)
+
+
+def _literal_to_bool(condition: ASTNode) -> bool | None:
+    if isinstance(condition, (IntLiteral, BoolLiteral)):
+        return bool(condition.value)
+    return None
