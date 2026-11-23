@@ -41,6 +41,32 @@ class Block(ASTNode):
 
 
 @dataclass
+class ExternDecl(ASTNode):
+    kind: str = "ExternDecl"
+
+    def __post_init__(self):
+        assert len(self.elems) >= 1  # name, params...
+        assert isinstance(self.elems[0], Ident)
+        for el in self.elems[1:]:
+            assert isinstance(
+                el, Ident
+            )  # NOTE: Grammar-3 tests expect Ident instead of Param
+
+
+@dataclass
+class FuncDecl(ASTNode):
+    kind: str = "FuncDecl"
+
+    def __post_init__(self):
+        assert len(self.elems) >= 2  # name, params..., body
+        assert isinstance(self.elems[0], Ident)
+        for el in self.elems[1:-1]:
+            assert isinstance(
+                el, Ident
+            )  # NOTE: Grammar-3 tests expect Ident instead of Param
+
+
+@dataclass
 class IfStatement(ASTNode):
     kind: str = "If"
 
@@ -108,6 +134,15 @@ class BinaryOperationExpr(ExpressionStatement):
 
     def __post_init__(self):
         assert len(self.elems) == 2
+
+
+@dataclass
+class Call(ExpressionStatement):
+    kind: str = "Call"
+
+    def __post_init__(self):
+        assert len(self.elems) >= 1  # callee, args...
+        assert isinstance(self.elems[0], Ident)
 
 
 @dataclass
@@ -218,3 +253,17 @@ class Ident(LiteralExpr):
 
     def __post_init__(self):
         assert isinstance(self.value, str)
+
+
+@dataclass
+class Param(Ident):
+    kind: str = "Param"
+
+    def __post_init__(self):
+        assert isinstance(self.value, str)
+
+
+def _literal_to_bool(condition: ASTNode) -> bool | None:
+    if isinstance(condition, (IntLiteral, BoolLiteral)):
+        return bool(condition.value)
+    return None

@@ -23,6 +23,10 @@ class SymbolMeta:
     def assinable(self):
         return self.subtype == "VAR"
 
+    @property
+    def to_arg(self):
+        return f"{self.type_} {self.id_}"
+
 
 @dataclass()
 class EvalExprResult:
@@ -94,7 +98,13 @@ class VisitorState:
 
         return label
 
-    def switch_function(self, name: str, ret_type: str) -> None:
+    def switch_function(
+        self,
+        name: str,
+        ret_type: str,
+        params: list[libast.Ident] | None = None,
+        external: bool = False,
+    ) -> None:
         if name == self.function:
             return
 
@@ -106,21 +116,53 @@ class VisitorState:
         assert name not in functions
 
         if self.function is not None:
+            assert self.label_terminated
             self.output += "}\n\n"
-        self.output += f"define {ret_type} @{name}() {{\nentry:\n"
 
-        self.function = name
-        self.label = "entry"
+        if not external:
+            self.function = name
+            self.label = "entry"
+            self.labels = {"entry"}
+        else:
+            self.function = None
+            self.label = None
+            self.labels = set()
+
         self.label_terminated = False
         self.store_counter = 0
         self.label_counter = 0
-        self.labels = {"entry"}
         self.symbols = functions
         self.symbols[name] = SymbolMeta(
             id_=name,
             type_="function",
             subtype=ret_type,
         )
+
+        func_params = []
+        if params is not None:
+            for node in params:
+                assert isinstance(node, libast.Ident)
+
+                type_ = node.subtype
+
+                if not external:
+                    ident_ = self.reserve_id()
+
+                    self.symbols[node.value] = SymbolMeta(
+                        id_=ident_,
+                        type_=type_,
+                        subtype="VAL",
+                    )
+                    func_params.append(f"{type_} {ident_}")
+                else:
+                    func_params.append(f"{type_}")
+
+        func_params = ", ".join(func_params)
+
+        if not external:
+            self.output += f"define {ret_type} @{name}({func_params}) {{\nentry:\n"
+        else:
+            self.output += f"declare {ret_type} @{name}({func_params})\n"
 
 
 class Visitor:
@@ -370,6 +412,20 @@ class Visitor:
                 return self._cast_integer(
                     src_expr=EvalExprResult(id_=store_id, type_="i1"), dst_type="i64"
                 )
+            case libast.Call():
+                args = [self._eval_expression(expr) for expr in node.elems[1:]]
+                store_id = self.state.reserve_id()
+
+                parsed_args = ", ".join(f"{arg.type_} {arg.id_}" for arg in args)
+
+                self.state.post_instruction(
+                    f"{store_id} = call {node.subtype} @{node.elems[0].value}({parsed_args})"
+                )
+
+                return EvalExprResult(
+                    id_=store_id,
+                    type_=node.subtype,
+                )
 
         self._assert(False, node, f"Failed to eval expression {node}")
 
@@ -410,7 +466,7 @@ class Visitor:
             self.state.switch_label(label_else)
             self.generate(node.elems[2])
 
-            # else_terminated = self.state.label_terminated
+            else_terminated = self.state.label_terminated
             self.state.branch_if_open(label_finish)
         else:
             self.state.post_instruction(
@@ -420,8 +476,8 @@ class Visitor:
         self.state.switch_label(label_if)
         self.generate(node.elems[1])
 
-        # if len(node.elems) == 3 and else_terminated and self.state.label_terminated:
-        #     return
+        if len(node.elems) == 3 and else_terminated and self.state.label_terminated:
+            return
 
         self.state.branch_if_open(label_finish)
         self.state.switch_label(label_finish)
@@ -507,13 +563,40 @@ class Visitor:
                 self._assert(
                     len(self.state.branching_nest_queue),
                     node,
-                    f"Break outside the loop",
+                    f"Continue outside the loop",
                 )
 
                 while_header = self.state.branching_nest_queue[-1][0]
                 self.state.post_instruction(f"br label %{while_header}")
             case _:
                 self._assert(False, node, f"Undefined statement {node}")
+
+    def _generate_function(self, function: libast.FuncDecl):
+        self.state.switch_function(
+            name=function.elems[0].value,
+            ret_type=function.subtype,
+            params=function.elems[1:-1],
+            external=False,
+        )
+
+        self.generate(function.elems[-1])
+
+    def generate_function(self, function: libast.ExternDecl | libast.FuncDecl):
+
+        match function:
+            case libast.ExternDecl():
+                name = function.elems[0].value
+
+                self.state.switch_function(
+                    name=name,
+                    ret_type=function.subtype,
+                    params=function.elems[1:],
+                    external=True,
+                )
+            case libast.FuncDecl():
+                self._generate_function(function)
+            case _:
+                raise RuntimeError()
 
     def generate_program(
         self, program: libast.Program, *, state: VisitorState = None
@@ -522,25 +605,23 @@ class Visitor:
 
         if state is None:
             self.state = VisitorState()
-            self.state.switch_function("main", "i64")
         else:
             self.state = state
 
-        for node in program:
-            if self.state.label_terminated:
-                break
-            self.generate(node)
+        for function in program:  # NOTE: grammar-3 Programm contains only functions
+            self.generate_function(function)
 
-        self._assert(
-            self.state.label_terminated,
-            program,
-            "Program must contain a return statement",
-        )
+        if self.state.function is not None:
+            self._assert(
+                self.state.label_terminated,
+                program,
+                "Function must contain a return statement",
+            )
 
-        # A supplied state leaves function wrapping to its caller.
-        if state is None:
-            self.state.output += "}\n"
-            self.state.function = None
-            self.state.label = None
+            # A supplied state leaves function wrapping to its caller.
+            if state is None:
+                self.state.output += "}\n"
+                self.state.function = None
+                self.state.label = None
 
         return self.state.output

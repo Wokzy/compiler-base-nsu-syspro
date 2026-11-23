@@ -1,10 +1,9 @@
 from dataclasses import dataclass
-from enum import Enum
+from re import escape
 from typing import Iterable
 
-from tokenizers import Tokenizer
-from tokenizers.models import WordPiece
-from tokenizers.pre_tokenizers import Whitespace
+from tokenizers import Regex
+from tokenizers.pre_tokenizers import Split
 
 
 @dataclass(frozen=True)
@@ -31,31 +30,25 @@ class Vocab:
     def __init__(
         self,
         tokens: Iterable[Token],
-        include_bpe: bool = True,
-        raw_bpe_kind: str = "RAW_BPE",
         unk_token: str = "<unk>",
     ):
         self.static_tokens: dict[str, Token] = {}
         self.dynamic_tokens: set[Token] = set()
+        self.unk_token = unk_token
 
         self.expand_from_tokens(tokens)
 
-        if include_bpe:
-            self.expand_from_tokens(build_alnum_tokens(raw_bpe_kind))
-
-        self.static_tokenizer = Tokenizer(
-            WordPiece(
-                vocab={
-                    token.value: idx
-                    for idx, token in enumerate(self.static_tokens.values())
-                },
-                unk_token=unk_token,
-                continuing_subword_prefix="",
-            )
+        symbols = [
+            escape(value)
+            for value in sorted(self.static_tokens, key=len, reverse=True)
+            if value != unk_token and not value.isidentifier()
+        ]
+        pattern = "|".join(
+            [r"\s+", r"[A-Za-z_][A-Za-z0-9_]*", r"[0-9]+", *symbols, r"."]
         )
-        self.static_tokenizer.pre_tokenizer = Whitespace()
+        self.pre_tokenizer = Split(Regex(pattern), behavior="isolated")
 
-    def expand_from_tokens(self, tokens: list[Token]) -> None:
+    def expand_from_tokens(self, tokens: Iterable[Token]) -> None:
         for tok in tokens:
             assert tok.line is None and tok.column is None, tok
             assert tok.kind is not None, tok
@@ -68,28 +61,30 @@ class Vocab:
     def expand_from_vocab(self, vocab) -> None:
         raise NotImplementedError
 
-    def raw_tokenize(self, text: str) -> list[Token]:
-        lines = text.split("\n")
+    def raw_tokenize(self, text: str) -> list[list[Token]]:
+        token_lines = []
+        for line_number, line in enumerate(text.split("\n"), start=1):
+            tokens = []
+            for value, (start, _) in self.pre_tokenizer.pre_tokenize_str(line):
+                if value.isspace():
+                    continue
 
-        result = []
+                static_token = self.static_tokens.get(value)
+                if static_token is not None:
+                    kind = static_token.kind
+                elif value.isascii() and value.isidentifier():
+                    kind = "IDENT"
+                elif value.isascii() and value.isdecimal():
+                    kind = "INT"
+                else:
+                    value = self.unk_token
+                    kind = self.static_tokens[value].kind
 
-        for i, line in enumerate(lines):
-            if not line:
-                continue
+                tokens.append(Token(kind, value, line_number, start + 1))
 
-            raw = self.static_tokenizer.encode(line)
+            token_lines.append(tokens)
 
-            for value, offset in zip(raw.tokens, raw.offsets):
-                result.append(
-                    Token(
-                        kind=self.static_tokens[value].kind,
-                        value=value,
-                        line=i + 1,
-                        column=offset[0] + 1,
-                    )
-                )
-
-        return result
+        return token_lines
 
     @property
     def size(self):
@@ -102,22 +97,3 @@ class Vocab:
             raise ValueError(f"No such token in vocab with id {key}")
 
         return self.id_to_token[key]
-
-
-def build_alnum_tokens(raw_bpe_kind: str) -> list[Token]:
-
-    res = []
-
-    alpahnum = "qwertyuiopasdfghjklzxcvbnm"
-    alpahnum += alpahnum.upper()
-    alpahnum += "0123456789"
-
-    for c in alpahnum:
-        res.append(
-            Token(
-                kind=raw_bpe_kind,
-                value=c,
-            )
-        )
-
-    return res

@@ -1,9 +1,6 @@
 from nsl_compiler.lexer import Token, Vocab
 
 
-from enum import Enum
-
-
 class Lexer:
     def __init__(self):
         self.vocab = Vocab(
@@ -35,6 +32,9 @@ class Lexer:
                 Token("AND", "&&"),
                 Token("OR", "||"),
                 Token("NOT", "!"),
+                Token("DEF", "def"),
+                Token("EXTERN", "extern"),
+                Token("COMMA", ","),
                 Token("LPAREN", "("),
                 Token("RPAREN", ")"),
                 Token("LBRACE", "{"),
@@ -54,90 +54,37 @@ class Lexer:
             f"Error: line {token.line}, column {token.column}: {message}"
         )
 
-    def _postprocess(self, raw_tokens: list[Token]) -> tuple[list[Token], bool]:
-
+    def _postprocess(self, raw_tokens: list[list[Token]]) -> list[Token]:
         result = []
-        concat: str = ""
-        concat_position = {"line": 0, "column": 0}
+        multiline_comment_start = None
 
-        error = False
+        for line in raw_tokens:
+            for token in line:
+                if multiline_comment_start is not None:
+                    if token.kind == "COMMENT_END":
+                        multiline_comment_start = None
+                    continue
 
-        def __resolve_concat():
-            nonlocal result, concat, concat_position
+                if token.kind == "LINE_COMMENT":
+                    break
 
-            if concat.isnumeric():
-                result.append(
-                    Token(
-                        "INT",
-                        value=concat,
-                        **concat_position,
-                    )
-                )
-            elif concat[0].isalpha():
-                result.append(
-                    Token(
-                        "IDENT",
-                        value=concat,
-                        **concat_position,
-                    )
-                )
-            else:
-                self._error(
-                    Token(
-                        "ERROR",
-                        **multiline_comment_start_position,
-                    ),
-                    f"Failed to resolve token {concat}",
-                )
+                if token.kind == "COMMENT_BEGIN":
+                    multiline_comment_start = token
+                    continue
 
-            concat = ""
-            concat_position = {"line": 0, "column": 0}
-
-        multiline_comment = False
-        multiline_comment_start_position = {"line": 0, "column": 0}
-
-        for token in raw_tokens:
-            if token.kind == "COMMENT_BEGIN":
-                multiline_comment = True
-                multiline_comment_start_position["line"] = token.line
-                multiline_comment_start_position["column"] = token.column
-                continue
-
-            if multiline_comment:
-                if token.kind == "COMMENT_END":
-                    multiline_comment = False
-                    multiline_comment_start_position = {"line": 0, "column": 0}
-                continue
-
-            if token.kind == "ERROR":
-                self._error(token, "Syntax Error")
-
-            if token.kind != "RAW_BPE":
-                if concat:
-                    __resolve_concat()
+                if token.kind == "ERROR":
+                    self._error(token, "Syntax Error")
 
                 result.append(token)
-            else:
-                if not concat:
-                    concat_position["line"] = token.line
-                    concat_position["column"] = token.column
 
-                assert len(token.value) == 1
-                concat += token.value
-
-        if concat:
-            __resolve_concat()
-
-        if multiline_comment:
-            result.append(
-                Token(
-                    "ERROR",
-                    value="Unterminated multiline comment",
-                    **multiline_comment_start_position,
-                )
+        if multiline_comment_start is not None:
+            error = Token(
+                "ERROR",
+                value="Unterminated multiline comment",
+                **multiline_comment_start.location,
             )
-
-            self._error(result[-1], result[-1].value)
+            result.append(error)
+            self._error(error, error.value)
 
         return result
 
