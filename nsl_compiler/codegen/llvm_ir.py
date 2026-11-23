@@ -116,6 +116,7 @@ class VisitorState:
         assert name not in functions
 
         if self.function is not None:
+            assert self.label_terminated
             self.output += "}\n\n"
 
         if not external:
@@ -147,7 +148,7 @@ class VisitorState:
                 if not external:
                     ident_ = self.reserve_id()
 
-                    self.symbols[ident_] = SymbolMeta(
+                    self.symbols[node.value] = SymbolMeta(
                         id_=ident_,
                         type_=type_,
                         subtype="VAL",
@@ -421,6 +422,11 @@ class Visitor:
                     f"{store_id} = call {node.subtype} @{node.elems[0].value}({parsed_args})"
                 )
 
+                return EvalExprResult(
+                    id_=store_id,
+                    type_=node.subtype,
+                )
+
         self._assert(False, node, f"Failed to eval expression {node}")
 
     def _declare(self, node: libast.DeclarationStatement) -> None:
@@ -460,7 +466,7 @@ class Visitor:
             self.state.switch_label(label_else)
             self.generate(node.elems[2])
 
-            # else_terminated = self.state.label_terminated
+            else_terminated = self.state.label_terminated
             self.state.branch_if_open(label_finish)
         else:
             self.state.post_instruction(
@@ -470,8 +476,8 @@ class Visitor:
         self.state.switch_label(label_if)
         self.generate(node.elems[1])
 
-        # if len(node.elems) == 3 and else_terminated and self.state.label_terminated:
-        #     return
+        if len(node.elems) == 3 and else_terminated and self.state.label_terminated:
+            return
 
         self.state.branch_if_open(label_finish)
         self.state.switch_label(label_finish)
@@ -599,7 +605,6 @@ class Visitor:
 
         if state is None:
             self.state = VisitorState()
-            self.state.switch_function("main", "i64")
         else:
             self.state = state
 

@@ -158,7 +158,9 @@ class Parser:
             if callee.value in self.symbols:
                 self._error(opening, f"cannot call variable '{callee.value}'")
 
-            callee = libast.Call(elems=elems, **opening.location)
+            callee = libast.Call(
+                elems=elems, subtype="i64", **opening.location
+            )  # NOTE: In grammar-3 we still have no types, so rely on i64 here
 
         return callee
 
