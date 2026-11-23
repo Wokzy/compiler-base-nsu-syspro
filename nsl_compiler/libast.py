@@ -41,6 +41,37 @@ class Block(ASTNode):
 
 
 @dataclass
+class ExternDecl(ASTNode):
+    kind: str = "ExternDecl"
+
+    def __post_init__(self):
+        assert len(self.elems) >= 1  # name, params...
+        assert isinstance(self.elems[0], str)
+        for el in self.elems[1:]:
+            assert isinstance(el, Param)
+
+
+@dataclass
+class FuncDecl(ASTNode):
+    kind: str = "FuncDecl"
+
+    def __post_init__(self):
+        assert len(self.elems) >= 2  # name, params..., body
+        assert isinstance(self.elems[0], str)
+        for el in self.elems[1:-1]:
+            assert isinstance(el, Param)
+
+
+@dataclass
+class Call(ASTNode):
+    kind: str = "Call"
+
+    def __post_init__(self):
+        assert len(self.elems) >= 1  # callee, args...
+        assert isinstance(self.elems[0], str)
+
+
+@dataclass
 class IfStatement(ASTNode):
     kind: str = "If"
 
@@ -215,6 +246,13 @@ class BoolLiteral(LiteralExpr):
 @dataclass
 class Ident(LiteralExpr):
     kind: str = "Ident"
+
+    def __post_init__(self):
+        assert isinstance(self.value, str)
+
+@dataclass
+class Param(Ident):
+    kind: str = "Param"
 
     def __post_init__(self):
         assert isinstance(self.value, str)
