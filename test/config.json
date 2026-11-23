@@ -27,7 +27,7 @@
       ]
     },
     "compiler": {
-      "cmd": ["python3.12", "-m", "nsl_compiler", "-g", "{grammar}", "-c", "{input}", "{llvm_out}", "--", "clang", "{llvm_out}", "-o", "{exe}"]
+      "cmd": ["python3.12", "-m", "nsl_compiler", "-g", "{grammar}", "-c", "{input}", "{llvm_out}", "--", "clang", "{llvm_out}", "{root}/libruntime/spl_runtime.c", "-o", "{exe}"]
     },
     "run": {
       "cmd": ["{exe}"],

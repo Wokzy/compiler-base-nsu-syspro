@@ -611,16 +611,17 @@ class Visitor:
         for function in program:  # NOTE: grammar-3 Programm contains only functions
             self.generate_function(function)
 
-        self._assert(
-            self.state.label_terminated,
-            program,
-            "Program must contain a return statement",
-        )
+        if self.state.function is not None:
+            self._assert(
+                self.state.label_terminated,
+                program,
+                "Function must contain a return statement",
+            )
 
-        # A supplied state leaves function wrapping to its caller.
-        if state is None:
-            self.state.output += "}\n"
-            self.state.function = None
-            self.state.label = None
+            # A supplied state leaves function wrapping to its caller.
+            if state is None:
+                self.state.output += "}\n"
+                self.state.function = None
+                self.state.label = None
 
         return self.state.output

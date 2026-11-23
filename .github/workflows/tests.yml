@@ -31,6 +31,15 @@ jobs:
       - name: Run grammar 3 parser tests
         run: python3 test/run_tests.py --stage parser --grammar 3 --test grammar3/ -v --keep all
 
+      - name: Run grammar 3 llvm tests
+        run: python3 test/run_tests.py --stage llvm --grammar 3 --test grammar3/ -v --keep all
+
+      - name: Run grammar 3 compiler tests
+        run: python3 test/run_tests.py --stage compiler --grammar 3 --test grammar3/ -v --keep all
+
+      - name: Run grammar 3 run tests
+        run: python3 test/run_tests.py --stage run --grammar 3 --test grammar3/ -v --keep all
+
       - name: Upload lexer test output
         if: always()
         uses: actions/upload-artifact@v7
